@@ -159,10 +159,18 @@ case "$1" in
         # Kind of a hack, don't know where else to put this
         # Rename `eth0` to `dsa` on boot, so that it is not confused for a usable
         # Ethernet interface
-        ip link set eth0 name dsa
+        ip link set eth0 name dsa 2>/dev/null || true
+
+        # Expand DSA conduit MTU to 1520 to provide headroom for 1492 PPPoE + 14 Eth + 4 DSA + 4 VLAN
+        ip link set dsa mtu 1520 2>/dev/null || true
 
         # Perform migration of interfaces
         migrate_overlay_interfaces_to_v2_1
+
+        # Apply flow control preference on switch ports (defaulting ge0 flow control to off)
+        if [ -x /usr/bin/tpi-flow-control ]; then
+            /usr/bin/tpi-flow-control apply
+        fi
         ;;
     *)
         echo "Usage: $0 {start}"

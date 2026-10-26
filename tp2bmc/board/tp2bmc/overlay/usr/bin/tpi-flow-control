@@ -1,0 +1,108 @@
+#!/bin/sh
+#
+# /usr/bin/tpi-flow-control
+# Query and configure IEEE 802.3x flow control on Turing Pi 2 switch ports
+#
+
+CONF_FILE="/etc/network/flow_control.conf"
+
+apply_flow_control() {
+    if [ ! -f "$CONF_FILE" ]; then
+        echo "GE0_FLOW_CONTROL=off" > "$CONF_FILE"
+    fi
+
+    # Read configuration
+    . "$CONF_FILE" 2>/dev/null || GE0_FLOW_CONTROL="off"
+
+    case "$GE0_FLOW_CONTROL" in
+        on|ON|1|true)
+            ethtool -A ge0 rx on tx on 2>/dev/null || true
+            ;;
+        *)
+            ethtool -A ge0 rx off tx off 2>/dev/null || true
+            ;;
+    esac
+}
+
+get_port_state() {
+    port="${1:-ge0}"
+    if [ -f "$CONF_FILE" ]; then
+        . "$CONF_FILE" 2>/dev/null || true
+    fi
+
+    case "$port" in
+        ge0)
+            echo "${GE0_FLOW_CONTROL:-off}"
+            ;;
+        ge1)
+            echo "${GE1_FLOW_CONTROL:-off}"
+            ;;
+        *)
+            echo "unsupported port: $port" >&2
+            return 1
+            ;;
+    esac
+}
+
+set_port_state() {
+    port="${1:-ge0}"
+    state="${2:-off}"
+
+    case "$state" in
+        on|ON|1|true)
+            normalized="on"
+            ;;
+        off|OFF|0|false)
+            normalized="off"
+            ;;
+        *)
+            echo "Invalid state: $state (must be 'on' or 'off')" >&2
+            return 1
+            ;;
+    esac
+
+    # Update or append
+    if [ -f "$CONF_FILE" ]; then
+        case "$port" in
+            ge0)
+                if grep -q "^GE0_FLOW_CONTROL=" "$CONF_FILE"; then
+                    sed -i "s/^GE0_FLOW_CONTROL=.*/GE0_FLOW_CONTROL=${normalized}/" "$CONF_FILE"
+                else
+                    echo "GE0_FLOW_CONTROL=${normalized}" >> "$CONF_FILE"
+                fi
+                ;;
+            ge1)
+                if grep -q "^GE1_FLOW_CONTROL=" "$CONF_FILE"; then
+                    sed -i "s/^GE1_FLOW_CONTROL=.*/GE1_FLOW_CONTROL=${normalized}/" "$CONF_FILE"
+                else
+                    echo "GE1_FLOW_CONTROL=${normalized}" >> "$CONF_FILE"
+                fi
+                ;;
+        esac
+    else
+        echo "GE0_FLOW_CONTROL=${normalized}" > "$CONF_FILE"
+    fi
+
+    # Apply immediately
+    if [ "$normalized" = "on" ]; then
+        ethtool -A "$port" rx on tx on 2>/dev/null || true
+    else
+        ethtool -A "$port" rx off tx off 2>/dev/null || true
+    fi
+}
+
+case "$1" in
+    apply|"")
+        apply_flow_control
+        ;;
+    get)
+        get_port_state "$2"
+        ;;
+    set)
+        set_port_state "$2" "$3"
+        ;;
+    *)
+        echo "Usage: $0 {apply|get [port]|set <port> <on|off>}"
+        exit 1
+        ;;
+esac
